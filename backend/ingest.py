@@ -50,7 +50,7 @@ ENDPOINT_NAME = os.getenv("ENDPOINT_DISPLAY_NAME")
 
 # Put your PDF path(s) here
 PDF_PATHS = [
-    r"E:\Downloads\Responsibilities.pdf"
+    r"E:\Downloads\Adventures-of-Huckleberry book-20-30.pdf"
 ]
 
 # ==========================================================

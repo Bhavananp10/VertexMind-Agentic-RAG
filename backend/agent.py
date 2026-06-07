@@ -616,43 +616,43 @@ if __name__ == "__main__":
 
     app = build_rag_graph()
 
-while True:
+    while True:
 
-    question = input("You: ").strip()
+        question = input("You: ").strip()
 
-    if not question:
-        continue
+        if not question:
+            continue
 
-    if question.lower() in [
-        "exit",
-        "quit",
-        "bye",
-    ]:
-        print(
-            "\n👋 Goodbye! "
-            "Happy learning GCP!"
+        if question.lower() in [
+            "exit",
+            "quit",
+            "bye",
+        ]:
+            print(
+                "\n👋 Goodbye! "
+                "Happy learning GCP!"
+            )
+            break
+
+        print("\n" + "-" * 60)
+
+        initial_state: GraphState = {
+            "question": question,
+            "route": "",
+            "vector_docs": [],
+            "web_results": [],
+            "final_answer": "",
+        }
+
+        result = app.invoke(
+            initial_state
         )
-        break
 
-    print("\n" + "-" * 60)
+        print(
+            f"\n🤖 Answer:\n"
+            f"{result['final_answer']}"
+        )
 
-    initial_state: GraphState = {
-        "question": question,
-        "route": "",
-        "vector_docs": [],
-        "web_results": [],
-        "final_answer": "",
-    }
-
-    result = app.invoke(
-        initial_state
-    )
-
-    print(
-        f"\n🤖 Answer:\n"
-        f"{result['final_answer']}"
-    )
-
-    print(
-        "-" * 60 + "\n"
-    )
+        print(
+            "-" * 60 + "\n"
+        )

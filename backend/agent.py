@@ -14,7 +14,7 @@ from langchain_groq import ChatGroq
 from langchain_google_vertexai import VertexAIEmbeddings
 from langchain_google_vertexai.vectorstores import VectorSearchVectorStore
 from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.documents import Document
 
 # GCP
@@ -146,6 +146,7 @@ class GraphState(TypedDict):
     vector_docs: list[Document]
     web_results: list[dict]
     final_answer: str
+    history: list[dict]   # conversation memory — empty list on first turn
 
 
 # =============================================================
@@ -165,48 +166,54 @@ def orchestrator(state: GraphState) -> GraphState:
     system_prompt = """
 You are an intelligent routing agent for a RAG system.
 
-Based on the user's question, decide where to search for the answer.
+You have two sources available:
+1. vectordb  - a local vector database containing chunks from uploaded PDF documents
+               (books, stories, reports, manuals, or any indexed file)
+2. websearch - live internet search for real-time or current information
 
-The uploaded document is a fictional corporate thriller story titled
-"THE LAST SIGNAL" about:
+YOUR ONLY JOB: pick the best source for the question.
 
-- NovaCrest Technologies - a tech company building SentinelAI
-- Arjun Mehta - CEO/founder of NovaCrest
-- Daniel Voss - Head of Core Architecture
-- Priya Sood - CFO of NovaCrest
-- Themes: corporate betrayal, ambition, IPO,
-  AI technology, whistleblowing, silence
+────────────────────────────────────────────────────────
+ROUTING RULES  (read carefully)
+────────────────────────────────────────────────────────
 
-Routing Rules:
+Reply "vectordb"
+  → question is about a book, story, novel, document, report or PDF
+  → question asks for a summary, chapter, plot, character, quote, event
+  → question says "in the document", "in the book", "chapter X", "the story"
+  → question is about ANY named character, place or event that sounds like fiction or a report
+  → WHEN IN DOUBT and the question feels document-like → always choose vectordb
 
-- Reply "vectordb"
-  -> if the question is about the story,
-     characters, events, plot, NovaCrest,
-     Arjun, Daniel, Priya, SentinelAI etc.
+Reply "websearch"
+  → question needs live / real-time data (news, prices, scores, weather)
+  → question is about current events, today's date, recent releases
+  → question cannot possibly be answered from a local document
 
-- Reply "websearch"
-  -> if the question requires current,
-     real-time or internet information.
+Reply "both"
+  → question needs content from the document AND also current web context
+  → e.g. "Compare what the book says about X with current reality"
 
-- Reply "both"
-  -> if the question requires BOTH
-     document context and web information.
+Reply "direct"
+  → pure greeting: "hello", "hi", "how are you"
+  → simple math or trivial fact requiring no retrieval
+  → nonsense or gibberish
 
-- Reply "direct"
-  -> if the question is a greeting,
-     small talk, gibberish, nonsense,
-     or general conversation.
+────────────────────────────────────────────────────────
+IMPORTANT BIAS RULE
+────────────────────────────────────────────────────────
+If you are unsure between vectordb and websearch,
+ALWAYS choose vectordb.
+Never choose websearch for questions that could be about
+a book, story, chapter, character, or document content.
 
-IMPORTANT:
-
-Reply with ONLY one of these exact words:
+────────────────────────────────────────────────────────
+Reply with ONLY one of these exact words (no punctuation, no explanation):
 
 vectordb
 websearch
 both
 direct
-
-Do NOT add any explanation.
+────────────────────────────────────────────────────────
 """
 
     response = llm.invoke(
@@ -254,21 +261,24 @@ def direct_llm(state: GraphState) -> GraphState:
         "(no retrieval needed)..."
     )
 
-    response = llm.invoke(
-        [
-            SystemMessage(
-                content=(
-                    "You are a friendly and "
-                    "helpful AI assistant. "
-                    "Respond naturally and "
-                    "conversationally."
-                )
-            ),
-            HumanMessage(
-                content=state["question"]
-            ),
-        ]
-    )
+    history = state.get("history", [])
+    messages = [
+        SystemMessage(
+            content=(
+                "You are VertexMind, a friendly and "
+                "helpful AI assistant. "
+                "Respond naturally and conversationally."
+            )
+        )
+    ]
+    for m in history[-6:]:
+        if m.get("role") == "user":
+            messages.append(HumanMessage(content=m.get("content", "")))
+        else:
+            messages.append(AIMessage(content=m.get("content", "")))
+    messages.append(HumanMessage(content=state["question"]))
+
+    response = llm.invoke(messages)
 
     print("✅ Direct answer generated!")
 
@@ -414,10 +424,23 @@ def generate(state: GraphState) -> GraphState:
     # ---------------------------------------------------------
     # Final Prompt
     # ---------------------------------------------------------
+    history = state.get("history", [])
+    history_block = ""
+    if history:
+        lines = [
+            f"{'User' if m.get('role') == 'user' else 'Assistant'}: {m.get('content', '')}"
+            for m in history[-6:]
+        ]
+        history_block = (
+            "Previous conversation:\n"
+            + "\n".join(lines)
+            + "\n\n"
+        )
+
     prompt = f"""
 You are a helpful and accurate AI assistant.
 
-Use the context provided below to answer the question clearly and concisely.
+{history_block}Use the context provided below to answer the question clearly and concisely.
 
 If the context doesn't contain enough information,
 say so honestly — do not make things up.
@@ -441,6 +464,99 @@ ANSWER:
         **state,
         "final_answer": response.content,
     }
+
+
+# =============================================================
+# HELPERS — citations · context · streaming
+# Used by the /chat/stream endpoint in app.py
+# =============================================================
+
+def extract_citations(vector_docs: list) -> list:
+    """Return unique source citations from retrieved docs."""
+    citations = []
+    seen: set = set()
+    for doc in vector_docs:
+        source = doc.metadata.get("source", "")
+        page   = doc.metadata.get("page", "?")
+        key    = f"{source}:{page}"
+        if key not in seen:
+            seen.add(key)
+            citations.append({
+                "source":  os.path.basename(source) if source else "Document",
+                "page":    page,
+                "snippet": doc.page_content[:200].strip(),
+            })
+    return citations
+
+
+def _build_full_context(state) -> str:
+    """Reconstruct the context string from state (mirrors generate logic)."""
+    parts = []
+    if state.get("vector_docs"):
+        doc_ctx = "\n\n".join(
+            f"[PDF Chunk {i+1} | Page {d.metadata.get('page','?')}]:\n{d.page_content}"
+            for i, d in enumerate(state["vector_docs"])
+        )
+        parts.append(f"=== From Your Documents ===\n{doc_ctx}")
+    if state.get("web_results"):
+        web_ctx = "\n\n".join(
+            f"[Web Result {i+1}]\nURL: {r.get('url','N/A')}\nContent: {r.get('content','')}"
+            for i, r in enumerate(state["web_results"])
+        )
+        parts.append(f"=== From Web Search ===\n{web_ctx}")
+    return "\n\n".join(parts) if parts else "No context retrieved."
+
+
+async def stream_final_answer(
+    question: str,
+    state,
+    history: list | None = None,
+):
+    """Async generator — yields answer tokens one by one for SSE streaming."""
+    history = history or []
+    route   = state.get("route", "")
+
+    if route == "direct":
+        msgs = [SystemMessage(
+            content=(
+                "You are VertexMind, a friendly and helpful AI assistant. "
+                "Respond naturally and conversationally."
+            )
+        )]
+        for m in history[-6:]:
+            if m.get("role") == "user":
+                msgs.append(HumanMessage(content=m.get("content", "")))
+            else:
+                msgs.append(AIMessage(content=m.get("content", "")))
+        msgs.append(HumanMessage(content=question))
+        async for chunk in llm.astream(msgs):
+            if chunk.content:
+                yield chunk.content
+        return
+
+    full_context = _build_full_context(state)
+
+    history_block = ""
+    if history:
+        lines = [
+            f"{'User' if m.get('role')=='user' else 'Assistant'}: {m.get('content','')}"
+            for m in history[-6:]
+        ]
+        history_block = "Previous conversation:\n" + "\n".join(lines) + "\n\n"
+
+    prompt = (
+        f"You are a helpful and accurate AI assistant.\n\n"
+        f"{history_block}"
+        f"Use the context below to answer clearly and concisely.\n"
+        f"If the context doesn't contain enough information, say so honestly.\n\n"
+        f"CONTEXT:\n{full_context}\n\n"
+        f"QUESTION:\n{question}\n\n"
+        f"ANSWER:\n"
+    )
+
+    async for chunk in llm.astream([HumanMessage(content=prompt)]):
+        if chunk.content:
+            yield chunk.content
 
 
 # =============================================================

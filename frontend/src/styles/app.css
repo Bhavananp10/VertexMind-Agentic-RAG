@@ -477,3 +477,317 @@ body {
 
   .status-badge { display: none; }
 }
+
+/* ============================================================
+   BUBBLE COLUMN (wraps bubble + citations)
+   ============================================================ */
+
+.bubble-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 72%;
+}
+
+.user .bubble-column   { align-items: flex-end; }
+.assistant .bubble-column { align-items: flex-start; }
+
+/* Override bubble max-width since bubble-column constrains it */
+.bubble-column .bubble { max-width: 100%; }
+
+/* ============================================================
+   STREAMING — cursor + status line
+   ============================================================ */
+
+.stream-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: currentColor;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  animation: blink-cursor 0.9s ease infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+.stream-status {
+  font-size: 13.5px;
+  color: var(--text-muted);
+  font-style: italic;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.stream-status::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse-status 1.2s ease infinite;
+}
+
+@keyframes pulse-status {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.75); }
+}
+
+/* ============================================================
+   CITATIONS
+   ============================================================ */
+
+.citation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.citation-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 2px;
+}
+
+.citation-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--ease);
+}
+
+.citation-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.citation-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.citation-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.citation-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.citation-source {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.citation-page {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-app);
+  padding: 1px 6px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.citation-snippet {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-style: italic;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ============================================================
+   PDF UPLOAD — drag overlay
+   ============================================================ */
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(59, 130, 246, 0.08);
+  backdrop-filter: blur(2px);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fade-in 0.15s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.drop-box {
+  background: var(--bg-surface);
+  border: 2.5px dashed var(--accent);
+  border-radius: 20px;
+  padding: 48px 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.drop-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: var(--accent-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.drop-icon svg { width: 30px; height: 30px; }
+
+.drop-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.drop-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   UPLOAD BUTTON (header)
+   ============================================================ */
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.upload-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent-light);
+  border: 1px solid #BFDBFE;
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: background var(--ease), box-shadow var(--ease);
+}
+
+.upload-btn:hover {
+  background: #DBEAFE;
+  box-shadow: 0 2px 8px rgba(59,130,246,0.15);
+}
+
+.upload-btn svg {
+  width: 14px;
+  height: 14px;
+  transform: rotate(180deg); /* arrow pointing up = upload */
+}
+
+/* ============================================================
+   UPLOAD STATUS TOAST
+   ============================================================ */
+
+.upload-toast {
+  position: fixed;
+  bottom: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 99px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: var(--shadow-md);
+  animation: slide-up-toast 0.2s ease;
+  white-space: nowrap;
+}
+
+@keyframes slide-up-toast {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.upload-toast--loading {
+  background: #EFF6FF;
+  color: #1D4ED8;
+  border: 1px solid #BFDBFE;
+}
+
+.upload-toast--success {
+  background: #F0FDF4;
+  color: #15803D;
+  border: 1px solid #BBF7D0;
+}
+
+.upload-toast--error {
+  background: #FEF2F2;
+  color: #B91C1C;
+  border: 1px solid #FECACA;
+}
+
+.toast-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ============================================================
+   RESPONSIVE ADDITIONS
+   ============================================================ */
+
+@media (max-width: 768px) {
+  .bubble-column { max-width: 86%; }
+  .upload-btn span { display: none; }
+  .drop-box { padding: 36px 40px; }
+}
+
+@media (max-width: 480px) {
+  .bubble-column { max-width: 92%; }
+  .upload-btn { padding: 6px 8px; }
+}

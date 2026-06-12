@@ -100,7 +100,7 @@ export default function App() {
           m.id === asstId ? { ...m, citations } : m
         ))
       },
-      onDone: () => {
+      onDone: async () => {
         setMessages(prev => prev.map(m =>
           m.id === asstId ? { ...m, streaming: false } : m
         ))
@@ -111,6 +111,7 @@ export default function App() {
           { role: 'user',      content: question     },
           { role: 'assistant', content: fullContent   },
         ].slice(-12))
+
       },
       onError: () => {
         setMessages(prev => prev.map(m =>
@@ -146,7 +147,10 @@ export default function App() {
         <ChatWindow messages={messages} loading={false} />
       </main>
 
-      <ChatInput onSend={handleSend} disabled={loading} />
+      <ChatInput
+        onSend={handleSend}
+        disabled={loading}
+      />
     </div>
   )
 }

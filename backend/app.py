@@ -18,10 +18,29 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, File, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, BackgroundTasks, File, UploadFile, Request
+from fastapi.responses import StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+from google.cloud import speech as gcp_speech
+from google.cloud import texttospeech
+
+# ── STT / TTS singletons (lazy) ───────────────────────────────
+_stt_client = None
+_tts_client = None
+
+def _get_stt():
+    global _stt_client
+    if _stt_client is None:
+        _stt_client = gcp_speech.SpeechClient()
+    return _stt_client
+
+def _get_tts():
+    global _tts_client
+    if _tts_client is None:
+        _tts_client = texttospeech.TextToSpeechClient()
+    return _tts_client
 
 from agent import (
     build_rag_graph,
@@ -162,6 +181,152 @@ async def chat_stream(request: ChatStreamRequest):
             "X-Accel-Buffering":"no",
         },
     )
+
+
+# ── /dialogflow-webhook  (Dialogflow CX fulfillment) ─────────
+
+@app.post("/dialogflow-webhook")
+async def dialogflow_webhook(request: Request):
+    """
+    Dialogflow CX calls this endpoint when it needs a dynamic answer.
+    We extract the user's question, run it through the LangGraph RAG
+    pipeline, and return the answer in the format Dialogflow expects.
+    """
+    body = await request.json()
+
+    # Dialogflow CX sends the user's text in the "text" field
+    user_text = body.get("text", "").strip()
+
+    # Fallback: some CX versions nest it differently
+    if not user_text:
+        user_text = (
+            body.get("transcript", "")
+            or body.get("fulfillmentInfo", {}).get("tag", "")
+        ).strip()
+
+    if not user_text:
+        return {
+            "fulfillmentResponse": {
+                "messages": [{"text": {"text": ["Sorry, I didn't receive your question. Please try again."]}}]
+            }
+        }
+
+    print(f"[dialogflow-webhook] Question: {user_text}")
+
+    # Run through the existing LangGraph RAG pipeline
+    state: GraphState = {
+        "question":     user_text,
+        "route":        "",
+        "vector_docs":  [],
+        "web_results":  [],
+        "final_answer": "",
+        "history":      [],
+    }
+
+    result    = await asyncio.to_thread(rag_app.invoke, state)
+    answer    = result["final_answer"]
+    citations = extract_citations(result.get("vector_docs", []))
+    route     = result.get("route", "")
+
+    print(f"[dialogflow-webhook] Route: {route} | Answer: {answer[:80]}...")
+
+    # Build citation text if docs were found
+    citation_text = ""
+    if citations:
+        sources = ", ".join(
+            f"{c['source']} (p.{c['page']})" for c in citations[:2]
+        )
+        citation_text = f"\n\nSources: {sources}"
+
+    # Return in Dialogflow CX webhook response format
+    return {
+        "fulfillmentResponse": {
+            "messages": [
+                {
+                    "text": {
+                        "text": [answer + citation_text]
+                    }
+                }
+            ]
+        },
+        "sessionInfo": {
+            "parameters": {
+                "last_route":    route,
+                "has_citations": len(citations) > 0,
+            }
+        }
+    }
+
+
+# ── /stt  (Speech-to-Text via Google Cloud) ──────────────────
+
+@app.post("/stt")
+async def speech_to_text(audio: UploadFile = File(...)):
+    audio_bytes = await audio.read()
+    print(f"[stt] Received audio: {len(audio_bytes)} bytes, type: {audio.content_type}")
+
+    try:
+        client = _get_stt()
+        recognition_audio = gcp_speech.RecognitionAudio(content=audio_bytes)
+        config = gcp_speech.RecognitionConfig(
+            encoding=gcp_speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
+            sample_rate_hertz=48000,
+            language_code="en-US",
+            enable_automatic_punctuation=True,
+        )
+        response = await asyncio.to_thread(
+            client.recognize, config=config, audio=recognition_audio
+        )
+        transcript = (
+            response.results[0].alternatives[0].transcript
+            if response.results else ""
+        )
+        print(f"[stt] Transcript: '{transcript}'")
+        return {"transcript": transcript}
+
+    except Exception as exc:
+        print(f"[stt] ERROR: {exc}")
+        raise HTTPException(status_code=500, detail=f"STT failed: {str(exc)}")
+
+
+# ── /tts  (Text-to-Speech via Google Cloud) ──────────────────
+
+class TTSRequest(BaseModel):
+    text: str
+
+@app.post("/tts")
+async def text_to_speech(request: TTSRequest):
+    """
+    Receives answer text from the frontend.
+    Converts to speech using Google Cloud Neural2 voice.
+    Returns MP3 audio bytes directly — browser plays it.
+    """
+    client = _get_tts()
+
+    synthesis_input = texttospeech.SynthesisInput(
+        text=request.text[:800]          # cap length to avoid long audio
+    )
+    voice = texttospeech.VoiceSelectionParams(
+        language_code="en-US",
+        name="en-US-Neural2-J",          # professional male neural voice
+    )
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3,
+        speaking_rate=1.0,
+    )
+
+    try:
+        tts_response = await asyncio.to_thread(
+            client.synthesize_speech,
+            input=synthesis_input,
+            voice=voice,
+            audio_config=audio_config,
+        )
+        return Response(content=tts_response.audio_content, media_type="audio/mpeg")
+
+    except Exception as exc:
+        print(f"[tts] ERROR: {exc}")
+        raise HTTPException(status_code=500, detail=f"TTS failed: {str(exc)}")
 
 
 # ── /upload  (PDF drag-drop ingestion) ───────────────────────

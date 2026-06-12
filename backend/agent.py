@@ -9,6 +9,9 @@ from typing_extensions import TypedDict
 # LangGraph
 from langgraph.graph import StateGraph, START, END
 
+# LangSmith — observability (traces every node run on smith.langchain.com)
+from langsmith import traceable
+
 # LangChain
 from langchain_groq import ChatGroq
 from langchain_google_vertexai import VertexAIEmbeddings
@@ -153,6 +156,7 @@ class GraphState(TypedDict):
 # NODE 1 — ORCHESTRATOR
 # Brain of the agent — decides WHERE to look for the answer
 # =============================================================
+@traceable(name="orchestrator")
 def orchestrator(state: GraphState) -> GraphState:
     """
     Routing Logic:
@@ -178,15 +182,15 @@ ROUTING RULES  (read carefully)
 ────────────────────────────────────────────────────────
 
 Reply "vectordb"
-  → question is about a book, story, novel, document, report or PDF
-  → question asks for a summary, chapter, plot, character, quote, event
-  → question says "in the document", "in the book", "chapter X", "the story"
-  → question is about ANY named character, place or event that sounds like fiction or a report
-  → WHEN IN DOUBT and the question feels document-like → always choose vectordb
+  → question is explicitly about a book, story, novel, document, report or PDF
+  → question asks for a summary, chapter, plot, character, quote, or event from a document
+  → question says "in the document", "in the book", "chapter X", "the story", "according to the PDF"
+  → question is about a named fictional character or event clearly from a story
 
 Reply "websearch"
   → question needs live / real-time data (news, prices, scores, weather)
   → question is about current events, today's date, recent releases
+  → question is about a real-world person, place, organisation, or public figure
   → question cannot possibly be answered from a local document
 
 Reply "both"
@@ -195,16 +199,17 @@ Reply "both"
 
 Reply "direct"
   → pure greeting: "hello", "hi", "how are you"
-  → simple math or trivial fact requiring no retrieval
+  → simple math: "what is 5 + 3"
+  → general knowledge / definition questions: "what is an elephant", "what is gravity", "who is Gautam Buddha"
+  → well-known historical figures, scientific concepts, common facts that any LLM knows
   → nonsense or gibberish
 
 ────────────────────────────────────────────────────────
 IMPORTANT BIAS RULE
 ────────────────────────────────────────────────────────
-If you are unsure between vectordb and websearch,
-ALWAYS choose vectordb.
-Never choose websearch for questions that could be about
-a book, story, chapter, character, or document content.
+Only choose "vectordb" when the question is clearly about the content of an uploaded document.
+For general knowledge questions about the real world, history, science, or famous people,
+choose "direct" — do NOT route these to vectordb.
 
 ────────────────────────────────────────────────────────
 Reply with ONLY one of these exact words (no punctuation, no explanation):
@@ -255,6 +260,7 @@ direct
 # NODE 2 — DIRECT LLM
 # Handles greetings, gibberish, small talk directly
 # =============================================================
+@traceable(name="direct_llm")
 def direct_llm(state: GraphState) -> GraphState:
     print(
         "💬 Direct LLM response "
@@ -292,6 +298,7 @@ def direct_llm(state: GraphState) -> GraphState:
 # NODE 3 — VECTOR DB RETRIEVER
 # Searches Vertex AI Vector Search for relevant PDF chunks
 # =============================================================
+@traceable(name="retrieve_from_vectordb")
 def retrieve_from_vectordb(
     state: GraphState,
 ) -> GraphState:
@@ -328,6 +335,7 @@ def retrieve_from_vectordb(
 # NODE 4 — WEB SEARCH
 # Searches the internet via Tavily for real-time information
 # =============================================================
+@traceable(name="search_web")
 def search_web(state: GraphState) -> GraphState:
 
     print("🌐 Searching the Web (Tavily)...")
@@ -335,6 +343,12 @@ def search_web(state: GraphState) -> GraphState:
     results = web_search.invoke(
         {"query": state["question"]}
     )
+
+    # Tavily occasionally returns plain strings instead of dicts — normalise them
+    results = [
+        r if isinstance(r, dict) else {"url": "", "content": str(r)}
+        for r in results
+    ]
 
     print(
         f"✅ Found {len(results)} web results."
@@ -356,6 +370,7 @@ def search_web(state: GraphState) -> GraphState:
 # NODE 5 — GENERATOR
 # Combines ALL retrieved context and generates the final answer
 # =============================================================
+@traceable(name="generate")
 def generate(state: GraphState) -> GraphState:
 
     print("🤖 Generating answer with Groq LLM...")
@@ -442,8 +457,8 @@ You are a helpful and accurate AI assistant.
 
 {history_block}Use the context provided below to answer the question clearly and concisely.
 
-If the context doesn't contain enough information,
-say so honestly — do not make things up.
+If the document context is not relevant to the question, ignore it and answer from the web results or your own knowledge.
+Do NOT mention that the topic was not found in the documents — just give the answer directly.
 
 CONTEXT:
 {full_context}
@@ -548,7 +563,8 @@ async def stream_final_answer(
         f"You are a helpful and accurate AI assistant.\n\n"
         f"{history_block}"
         f"Use the context below to answer clearly and concisely.\n"
-        f"If the context doesn't contain enough information, say so honestly.\n\n"
+        f"If the document context is not relevant to the question, ignore it and answer from the web results or your own knowledge.\n"
+        f"Do NOT mention that the topic was not found in the documents — just give the answer directly.\n\n"
         f"CONTEXT:\n{full_context}\n\n"
         f"QUESTION:\n{question}\n\n"
         f"ANSWER:\n"

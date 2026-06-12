@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem \"C:\\\\nvm4w\\\\nodejs\" -ErrorAction SilentlyContinue; \\(Get-Item \"C:\\\\nvm4w\\\\nodejs\" -ErrorAction SilentlyContinue\\).Target)",
+      "Bash(mkdir -p \"C:\\\\Users\\\\BHAVANA\\\\.claude\\\\projects\\\\e--GCP-Agent\\\\memory\")",
+      "PowerShell(& \"E:\\\\GCP Agent\\\\backend\\\\.venv\\\\Scripts\\\\pip.exe\" install google-cloud-speech google-cloud-texttospeech)",
+      "PowerShell(& \"E:\\\\GCP Agent\\\\backend\\\\.venv\\\\Scripts\\\\pip3.exe\" install google-cloud-speech google-cloud-texttospeech)",
+      "PowerShell(& \"E:\\\\GCP Agent\\\\backend\\\\.venv\\\\Scripts\\\\python.exe\" -c \"from google.cloud import speech; c = speech.SpeechClient\\(\\); print\\('STT OK'\\)\" 2>&1)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\BHAVANA\\.claude\\projects\\e--GCP-Agent\\memory"
+    ]
+  }
+}

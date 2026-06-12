@@ -70,3 +70,24 @@ export async function uploadPdf(file) {
   })
   return res.data
 }
+
+// ── Speech-to-Text — sends mic audio, returns transcript ─────
+export async function transcribeAudio(audioBlob) {
+  const form = new FormData()
+  form.append('audio', audioBlob, 'recording.webm')
+  const res = await axios.post(`${BASE}/stt`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 30_000,
+  })
+  return res.data.transcript || ''
+}
+
+// ── Text-to-Speech — returns a playable object URL ───────────
+export async function synthesizeSpeech(text) {
+  const res = await axios.post(`${BASE}/tts`, { text }, {
+    responseType: 'arraybuffer',
+    timeout: 30_000,
+  })
+  const blob = new Blob([res.data], { type: 'audio/mpeg' })
+  return URL.createObjectURL(blob)
+}
